@@ -320,8 +320,12 @@
             
             sheetNames.forEach((sheet, index) => {
                 const tr = document.createElement('tr');
+                const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
                 tr.innerHTML = `
-                    <td>${sheet.file}</td>
+                    <td>
+                        ${fileNameWithoutExt}
+                        <input type="hidden" class="original-filename" value="${sheet.file}">
+                    </td>
                     <td>${sheet.row_count.toLocaleString()}</td>
                     <td>
                         <span class="sheet-name">${sheet.sanitized}</span>
@@ -462,9 +466,9 @@
             
             const customSheetNames = {};
             document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
-                const fileName = tr.cells[0].textContent;
-                // 去掉文件扩展名
-                const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
+                // 从隐藏的原始文件名获取完整文件名
+                const originalFileName = tr.querySelector('.original-filename') || { value: tr.cells[0].textContent + '.csv' };
+                const fileNameWithoutExt = originalFileName.value.replace(/\.[^/.]+$/, "");
                 const sheetName = tr.querySelector('.sheet-name').textContent;
                 customSheetNames[fileNameWithoutExt] = sheetName;
             });
