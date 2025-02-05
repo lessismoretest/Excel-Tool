@@ -58,6 +58,32 @@
                                 <label for="singleSheet">合并成一个sheet</label>
                             </div>
                         </div>
+
+                        <!-- 合并成一个sheet的额外选项 -->
+                        <div id="singleSheetOptions" class="sub-options" style="display: none; margin-top: 10px; padding-left: 20px;">
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="removeHeaders" name="remove_headers" checked>
+                                    去除重复表头
+                                </label>
+                                <div class="sub-option" style="margin-left: 20px;">
+                                    <label>从第</label>
+                                    <input type="number" id="headerRow" name="header_row" value="1" min="1" style="width: 60px;">
+                                    <label>行开始</label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>
+                                    <input type="checkbox" id="addSourceColumn" name="add_source_column" checked>
+                                    添加来源列
+                                </label>
+                                <div class="sub-option" style="margin-left: 20px;">
+                                    <label>插入到第</label>
+                                    <input type="number" id="sourceColumnPosition" name="source_column_position" value="1" min="1" style="width: 60px;">
+                                    <label>列</label>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -112,11 +138,11 @@
         <div class="panel preview-panel">
             <h2>预览</h2>
             <div id="sheetPreview" class="sheet-preview">
-                <h3>Sheet名称预览：</h3>
+                <h3 id="previewTitle">Sheet名称预览：</h3>
                 <div class="sheet-list">
                     <table>
                         <thead>
-                            <tr>
+                            <tr id="previewTableHeader">
                                 <th>文件名</th>
                                 <th>行数</th>
                                 <th>生成的Sheet名</th>
@@ -142,6 +168,23 @@
             background-color: #f5f5f5;
             border-radius: 4px;
             margin-top: 10px;
+        }
+        .sub-options {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 5px;
+        }
+        .sub-option {
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .sub-option input[type="number"] {
+            padding: 2px 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
         }
     </style>
 
@@ -316,28 +359,127 @@
         function displaySheetPreview(sheetNames, totalRows) {
             const previewList = document.getElementById('sheetPreviewList');
             const totalRowsDiv = document.getElementById('totalRows');
+            const previewTableHeader = document.getElementById('previewTableHeader');
+            const previewTitle = document.getElementById('previewTitle');
             previewList.innerHTML = '';
             
-            sheetNames.forEach((sheet, index) => {
-                const tr = document.createElement('tr');
-                const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
-                tr.innerHTML = `
-                    <td>
-                        ${fileNameWithoutExt}
-                        <input type="hidden" class="original-filename" value="${sheet.file}">
-                    </td>
-                    <td>${sheet.row_count.toLocaleString()}</td>
-                    <td>
-                        <span class="sheet-name">${sheet.sanitized}</span>
-                        <input type="text" class="sheet-name-edit" style="display: none;" value="${sheet.sanitized}">
-                    </td>
-                    <td>
-                        <button class="edit-btn" onclick="toggleEdit(this)">编辑</button>
-                        <button class="save-btn" style="display: none;" onclick="saveEdit(this)">保存</button>
-                    </td>
+            // 获取合并方式
+            const mergeType = document.querySelector('input[name="merge_type"]:checked').value;
+            const addSourceColumn = document.getElementById('addSourceColumn')?.checked || false;
+            
+            // 如果是合并成一个sheet且需要添加来源列，显示列预览
+            if (mergeType === 'single_sheet') {
+                previewTitle.textContent = '列预览：';
+                if (addSourceColumn) {
+                    // 修改表头
+                    previewTableHeader.innerHTML = `
+                        <th>文件名</th>
+                        <th>行数</th>
+                        <th>来源列名称</th>
+                        <th>操作</th>
+                    `;
+                    
+                    sheetNames.forEach((sheet, index) => {
+                        const tr = document.createElement('tr');
+                        const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
+                        tr.innerHTML = `
+                            <td>
+                                ${fileNameWithoutExt}
+                                <input type="hidden" class="original-filename" value="${sheet.file}">
+                            </td>
+                            <td>${sheet.row_count.toLocaleString()}</td>
+                            <td>
+                                <span class="source-column-name">${fileNameWithoutExt}</span>
+                                <input type="text" class="source-column-edit" style="display: none;" value="${fileNameWithoutExt}">
+                            </td>
+                            <td>
+                                <button class="edit-btn" onclick="toggleSourceEdit(this)">编辑</button>
+                                <button class="save-btn" style="display: none;" onclick="saveSourceEdit(this)">保存</button>
+                            </td>
+                        `;
+                        previewList.appendChild(tr);
+                    });
+                } else {
+                    // 如果没有添加来源列，只显示文件名和行数
+                    previewTableHeader.innerHTML = `
+                        <th>文件名</th>
+                        <th>行数</th>
+                    `;
+                    
+                    sheetNames.forEach((sheet, index) => {
+                        const tr = document.createElement('tr');
+                        const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
+                        tr.innerHTML = `
+                            <td>
+                                ${fileNameWithoutExt}
+                                <input type="hidden" class="original-filename" value="${sheet.file}">
+                            </td>
+                            <td>${sheet.row_count.toLocaleString()}</td>
+                        `;
+                        previewList.appendChild(tr);
+                    });
+                }
+            } else if (mergeType === 'sheet') {
+                // 按原表名分sheet，显示sheet名预览
+                previewTitle.textContent = 'Sheet名称预览：';
+                previewTableHeader.innerHTML = `
+                    <th>文件名</th>
+                    <th>行数</th>
+                    <th>Sheet名</th>
+                    <th>操作</th>
                 `;
-                previewList.appendChild(tr);
-            });
+                
+                sheetNames.forEach((sheet, index) => {
+                    const tr = document.createElement('tr');
+                    const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
+                    tr.innerHTML = `
+                        <td>
+                            ${fileNameWithoutExt}
+                            <input type="hidden" class="original-filename" value="${sheet.file}">
+                        </td>
+                        <td>${sheet.row_count.toLocaleString()}</td>
+                        <td>
+                            <span class="sheet-name">${sheet.sanitized}</span>
+                            <input type="text" class="sheet-name-edit" style="display: none;" value="${sheet.sanitized}">
+                        </td>
+                        <td>
+                            <button class="edit-btn" onclick="toggleEdit(this)">编辑</button>
+                            <button class="save-btn" style="display: none;" onclick="saveEdit(this)">保存</button>
+                        </td>
+                    `;
+                    previewList.appendChild(tr);
+                });
+            } else {
+                // 相同sheet名合并
+                previewTitle.textContent = '预览：';
+                previewTableHeader.innerHTML = `
+                    <th>文件名</th>
+                    <th>行数</th>
+                    <th>Sheet名</th>
+                    <th>操作</th>
+                `;
+                
+                sheetNames.forEach((sheet, index) => {
+                    const tr = document.createElement('tr');
+                    const fileNameWithoutExt = sheet.file.replace(/\.[^/.]+$/, "");
+                    tr.innerHTML = `
+                        <td>
+                            ${fileNameWithoutExt}
+                            <input type="hidden" class="original-filename" value="${sheet.file}">
+                        </td>
+                        <td>${sheet.row_count.toLocaleString()}</td>
+                        <td>
+                            <span class="sheet-name">${sheet.sanitized}</span>
+                            <input type="text" class="sheet-name-edit" style="display: none;" value="${sheet.sanitized}">
+                        </td>
+                        <td>
+                            <button class="edit-btn" onclick="toggleEdit(this)">编辑</button>
+                            <button class="save-btn" style="display: none;" onclick="saveEdit(this)">保存</button>
+                        </td>
+                    `;
+                    previewList.appendChild(tr);
+                });
+            }
             
             totalRowsDiv.innerHTML = `总行数：${totalRows.toLocaleString()}`;
             document.getElementById('sheetPreview').style.display = 'block';
@@ -464,14 +606,40 @@
             const outputFormat = document.querySelector('input[name="output_format"]:checked').value;
             const customFilename = document.getElementById('outputFilename').textContent;
             
+            // 添加合并成一个sheet的选项
+            if (mergeType === 'single_sheet') {
+                const removeHeaders = document.getElementById('removeHeaders').checked;
+                const headerRow = document.getElementById('headerRow').value;
+                const addSourceColumn = document.getElementById('addSourceColumn').checked;
+                const sourceColumnPosition = document.getElementById('sourceColumnPosition').value;
+                
+                formData.append('remove_headers', removeHeaders);
+                formData.append('header_row', headerRow);
+                formData.append('add_source_column', addSourceColumn);
+                formData.append('source_column_position', sourceColumnPosition);
+                
+                // 如果需要添加来源列，收集来源列名称
+                if (addSourceColumn) {
+                    const sourceColumnNames = {};
+                    document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
+                        const originalFileName = tr.querySelector('.original-filename').value;
+                        const fileNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
+                        const sourceName = tr.querySelector('.source-column-name').textContent;
+                        sourceColumnNames[fileNameWithoutExt] = sourceName;
+                    });
+                    formData.append('source_column_names', JSON.stringify(sourceColumnNames));
+                }
+            }
+            
             const customSheetNames = {};
-            document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
-                // 从隐藏的原始文件名获取完整文件名
-                const originalFileName = tr.querySelector('.original-filename') || { value: tr.cells[0].textContent + '.csv' };
-                const fileNameWithoutExt = originalFileName.value.replace(/\.[^/.]+$/, "");
-                const sheetName = tr.querySelector('.sheet-name').textContent;
-                customSheetNames[fileNameWithoutExt] = sheetName;
-            });
+            if (mergeType !== 'single_sheet') {
+                document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
+                    const originalFileName = tr.querySelector('.original-filename').value;
+                    const fileNameWithoutExt = originalFileName.replace(/\.[^/.]+$/, "");
+                    const sheetName = tr.querySelector('.sheet-name').textContent;
+                    customSheetNames[fileNameWithoutExt] = sheetName;
+                });
+            }
             
             for (let file of selectedFiles) {
                 formData.append('files[]', file);
@@ -507,6 +675,65 @@
         });
 
         document.addEventListener('DOMContentLoaded', updateFilenamePreview);
+
+        // 监听合并方式变化
+        document.querySelectorAll('input[name="merge_type"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                const singleSheetOptions = document.getElementById('singleSheetOptions');
+                singleSheetOptions.style.display = this.value === 'single_sheet' ? 'block' : 'none';
+                
+                // 重新获取预览信息
+                previewSheetNames();
+            });
+        });
+
+        // 监听去除表头选项变化
+        document.getElementById('removeHeaders').addEventListener('change', function() {
+            const headerRowInput = document.getElementById('headerRow');
+            headerRowInput.disabled = !this.checked;
+        });
+
+        // 监听添加来源列选项变化
+        document.getElementById('addSourceColumn').addEventListener('change', function() {
+            const sourceColumnPositionInput = document.getElementById('sourceColumnPosition');
+            sourceColumnPositionInput.disabled = !this.checked;
+            // 重新获取预览信息
+            previewSheetNames();
+        });
+
+        // 切换来源列名称编辑状态
+        function toggleSourceEdit(btn) {
+            const tr = btn.closest('tr');
+            const nameSpan = tr.querySelector('.source-column-name');
+            const nameInput = tr.querySelector('.source-column-edit');
+            const saveBtn = tr.querySelector('.save-btn');
+            
+            nameSpan.style.display = 'none';
+            nameInput.style.display = 'block';
+            btn.style.display = 'none';
+            saveBtn.style.display = 'inline-block';
+            
+            nameInput.focus();
+        }
+
+        // 保存来源列名称
+        function saveSourceEdit(btn) {
+            const tr = btn.closest('tr');
+            const nameSpan = tr.querySelector('.source-column-name');
+            const nameInput = tr.querySelector('.source-column-edit');
+            const editBtn = tr.querySelector('.edit-btn');
+            
+            const newName = nameInput.value.trim();
+            if (newName) {
+                nameSpan.textContent = newName;
+                nameSpan.style.display = 'block';
+                nameInput.style.display = 'none';
+                btn.style.display = 'none';
+                editBtn.style.display = 'inline-block';
+            } else {
+                alert('来源列名称不能为空');
+            }
+        }
     </script>
 </body>
 </html> 

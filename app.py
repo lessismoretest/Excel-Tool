@@ -227,18 +227,42 @@ def merge_files(file_paths, merge_type, output_format='xlsx', output_filename=No
     if merge_type == 'single_sheet':
         # 合并成单个sheet
         all_data = []
+        
+        # 获取合并选项
+        remove_headers = request.form.get('remove_headers', 'false').lower() == 'true'
+        header_row = int(request.form.get('header_row', '1'))
+        add_source_column = request.form.get('add_source_column', 'false').lower() == 'true'
+        source_column_position = int(request.form.get('source_column_position', '1'))
+        
+        try:
+            source_column_names = json.loads(request.form.get('source_column_names', '{}'))
+        except:
+            source_column_names = {}
+        
+        first_file = True
         for file_path in file_paths:
             try:
                 if file_path.endswith('.csv'):
-                    df = pd.read_csv(file_path)
-                    df['来源文件'] = os.path.basename(file_path)
-                    all_data.append(df)
+                    if remove_headers and not first_file:
+                        df = pd.read_csv(file_path, skiprows=range(1, header_row))
+                    else:
+                        df = pd.read_csv(file_path)
                 else:
-                    xls = pd.ExcelFile(file_path)
-                    for sheet in xls.sheet_names:
-                        df = pd.read_excel(file_path, sheet_name=sheet)
-                        df['来源文件'] = f"{os.path.basename(file_path)} - {sheet}"
-                        all_data.append(df)
+                    if remove_headers and not first_file:
+                        df = pd.read_excel(file_path, skiprows=range(1, header_row))
+                    else:
+                        df = pd.read_excel(file_path)
+                
+                if add_source_column:
+                    # 获取不带扩展名的文件名
+                    base_name = os.path.splitext(os.path.basename(file_path))[0]
+                    # 使用自定义来源列名称或默认使用文件名
+                    source_name = source_column_names.get(base_name, base_name)
+                    # 在指定位置插入来源列
+                    df.insert(source_column_position - 1, '来源', source_name)
+                
+                all_data.append(df)
+                first_file = False
             except Exception as e:
                 raise Exception(f"处理文件 {os.path.basename(file_path)} 时出错: {str(e)}")
         
