@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel文件合并工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 左侧：文件区域 -->
+        <div class="panel source-panel">
+            <h2>源文件</h2>
+            <div class="form-group">
+                <label for="files">选择文件：</label>
+                <input type="file" id="files" name="files[]" multiple accept=".xlsx,.xls,.csv" required>
+            </div>
+            
+            <div id="fileList" class="file-list">
+                <div class="file-list-header">
+                    <h3>已选择的文件：</h3>
+                    <div class="file-actions">
+                        <label class="checkbox-container">
+                            <input type="checkbox" id="selectAll" checked>
+                            <span class="checkmark"></span>
+                            全选
+                        </label>
+                        <button type="button" class="delete-btn" id="deleteSelected" onclick="deleteSelectedFiles()">
+                            删除所选
+                        </button>
+                    </div>
+                </div>
+                <ul></ul>
+            </div>
+        </div>
+
+        <!-- 中间：处理选项 -->
+        <div class="panel process-panel">
+            <h2>处理选项</h2>
+            <form id="uploadForm">
+                <!-- 合并选项组 -->
+                <div class="option-group">
+                    <div class="option-group-header">
+                        <i class="icon">📑</i>
+                        <span>合并选项</span>
+                    </div>
+                    <div class="option-group-content">
+                        <div class="form-group">
+                            <label>合并方式：</label>
+                            <div class="radio-group">
+                                <input type="radio" id="bySheet" name="merge_type" value="sheet" checked>
+                                <label for="bySheet">按原表名分sheet</label>
+                                
+                                <input type="radio" id="combine" name="merge_type" value="combine">
+                                <label for="combine">相同sheet名合并</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 输出选项组 -->
+                <div class="option-group">
+                    <div class="option-group-header">
+                        <i class="icon">💾</i>
+                        <span>输出选项</span>
+                    </div>
+                    <div class="option-group-content">
+                        <div class="form-group">
+                            <label>输出格式：</label>
+                            <div class="radio-group">
+                                <input type="radio" id="formatXlsx" name="output_format" value="xlsx" checked>
+                                <label for="formatXlsx">Excel (.xlsx)</label>
+                                
+                                <input type="radio" id="formatCsv" name="output_format" value="csv">
+                                <label for="formatCsv">CSV (.csv)</label>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>输出文件名：</label>
+                            <div class="filename-preview">
+                                <span id="outputFilename" class="output-filename"></span>
+                                <input type="text" id="outputFilenameEdit" class="filename-edit" style="display: none;">
+                                <button type="button" class="edit-btn" id="editFilenameBtn" onclick="toggleFilenameEdit()">编辑</button>
+                                <button type="button" class="save-btn" id="saveFilenameBtn" style="display: none;" onclick="saveFilenameEdit()">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="option-group">
+                    <button type="submit" id="mergeBtn" class="primary-btn">
+                        <i class="icon">🔄</i>
+                        开始合并
+                    </button>
+                </div>
+
+                <div id="progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <p class="progress-text">处理中...</p>
+                </div>
+            </form>
+        </div>
+
+        <!-- 右侧：预览区域 -->
+        <div class="panel preview-panel">
+            <h2>预览</h2>
+            <div id="sheetPreview" class="sheet-preview">
+                <h3>Sheet名称预览：</h3>
+                <div class="sheet-list">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>文件名</th>
+                                <th>生成的Sheet名</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sheetPreviewList"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="downloadSection" style="display: none;">
+                <a id="downloadBtn" class="download-btn" href="#">下载合并后的文件</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 文件列表管理
+        class FileListManager {
+            constructor() {
+                this.files = new Map(); // 存储文件信息：{id: {file, selected}}
+                this.nextId = 1;
+                
+                // 初始化事件监听
+                this.initEventListeners();
+            }
+
+            initEventListeners() {
+                // 全选/取消全选
+                document.getElementById('selectAll').addEventListener('change', (e) => {
+                    const checked = e.target.checked;
+                    this.files.forEach((fileInfo, id) => {
+                        fileInfo.selected = checked;
+                        document.querySelector(`#file-${id} input[type="checkbox"]`).checked = checked;
+                    });
+                    this.updatePreview();
+                });
+            }
+
+            // 添加新文件
+            addFiles(fileList) {
+                const fileListElement = document.querySelector('#fileList ul');
+                fileListElement.innerHTML = ''; // 清空现有列表
+                this.files.clear(); // 清空文件集合
+
+                for (let file of fileList) {
+                    const id = this.nextId++;
+                    this.files.set(id, {
+                        file: file,
+                        selected: true
+                    });
+
+                    const li = document.createElement('li');
+                    li.id = `file-${id}`;
+                    li.innerHTML = `
+                        <label class="checkbox-container">
+                            <input type="checkbox" checked onchange="fileListManager.toggleFile(${id})">
+                            <span class="checkmark"></span>
+                        </label>
+                        <div class="file-info">
+                            ${file.name} (${this.formatFileSize(file.size)})
+                        </div>
+                    `;
+                    fileListElement.appendChild(li);
+                }
+
+                document.getElementById('fileList').style.display = this.files.size ? 'block' : 'none';
+                this.updatePreview();
+            }
+
+            // 切换文件选中状态
+            toggleFile(id) {
+                const fileInfo = this.files.get(id);
+                if (fileInfo) {
+                    fileInfo.selected = !fileInfo.selected;
+                    document.querySelector(`#file-${id} input[type="checkbox"]`).checked = fileInfo.selected;
+                    
+                    // 更新全选框状态
+                    this.updateSelectAllState();
+                    this.updatePreview();
+                }
+            }
+
+            // 删除选中的文件
+            deleteSelectedFiles() {
+                const idsToDelete = [];
+                this.files.forEach((fileInfo, id) => {
+                    if (fileInfo.selected) {
+                        idsToDelete.push(id);
+                    }
+                });
+
+                idsToDelete.forEach(id => {
+                    document.querySelector(`#file-${id}`).remove();
+                    this.files.delete(id);
+                });
+
+                document.getElementById('fileList').style.display = this.files.size ? 'block' : 'none';
+                this.updatePreview();
+            }
+
+            // 获取选中的文件
+            getSelectedFiles() {
+                const selectedFiles = [];
+                this.files.forEach(fileInfo => {
+                    if (fileInfo.selected) {
+                        selectedFiles.push(fileInfo.file);
+                    }
+                });
+                return selectedFiles;
+            }
+
+            // 更新全选框状态
+            updateSelectAllState() {
+                const selectAllCheckbox = document.getElementById('selectAll');
+                const allSelected = Array.from(this.files.values()).every(fileInfo => fileInfo.selected);
+                const someSelected = Array.from(this.files.values()).some(fileInfo => fileInfo.selected);
+                
+                selectAllCheckbox.checked = allSelected;
+                selectAllCheckbox.indeterminate = someSelected && !allSelected;
+            }
+
+            // 更新预览
+            updatePreview() {
+                previewSheetNames();
+            }
+
+            // 格式化文件大小
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+        }
+
+        // 创建文件列表管理器实例
+        const fileListManager = new FileListManager();
+
+        // 修改文件选择事件处理
+        document.getElementById('files').addEventListener('change', function(e) {
+            fileListManager.addFiles(this.files);
+        });
+
+        // 删除选中文件
+        function deleteSelectedFiles() {
+            fileListManager.deleteSelectedFiles();
+        }
+
+        // 修改预览和上传函数，只处理选中的文件
+        async function previewSheetNames() {
+            const selectedFiles = fileListManager.getSelectedFiles();
+            if (selectedFiles.length === 0) {
+                document.getElementById('sheetPreview').style.display = 'none';
+                return;
+            }
+
+            const mergeType = document.querySelector('input[name="merge_type"]:checked').value;
+            const formData = new FormData();
+            
+            for (let file of selectedFiles) {
+                formData.append('files[]', file);
+            }
+            formData.append('merge_type', mergeType);
+
+            try {
+                const response = await fetch('/preview', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displaySheetPreview(result.sheet_names);
+                } else {
+                    alert('预览失败：' + result.error);
+                }
+            } catch (error) {
+                alert('发生错误：' + error);
+            }
+        }
+
+        function displaySheetPreview(sheetNames) {
+            const previewList = document.getElementById('sheetPreviewList');
+            previewList.innerHTML = '';
+            
+            sheetNames.forEach((sheet, index) => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${sheet.file}</td>
+                    <td>
+                        <span class="sheet-name">${sheet.sanitized}</span>
+                        <input type="text" class="sheet-name-edit" style="display: none;" value="${sheet.sanitized}">
+                    </td>
+                    <td>
+                        <button class="edit-btn" onclick="toggleEdit(this)">编辑</button>
+                        <button class="save-btn" style="display: none;" onclick="saveEdit(this)">保存</button>
+                    </td>
+                `;
+                previewList.appendChild(tr);
+            });
+            
+            document.getElementById('sheetPreview').style.display = 'block';
+        }
+
+        function toggleEdit(btn) {
+            const tr = btn.closest('tr');
+            const nameSpan = tr.querySelector('.sheet-name');
+            const nameInput = tr.querySelector('.sheet-name-edit');
+            const saveBtn = tr.querySelector('.save-btn');
+            
+            nameSpan.style.display = 'none';
+            nameInput.style.display = 'block';
+            btn.style.display = 'none';
+            saveBtn.style.display = 'inline-block';
+            
+            nameInput.focus();
+        }
+
+        function saveEdit(btn) {
+            const tr = btn.closest('tr');
+            const nameSpan = tr.querySelector('.sheet-name');
+            const nameInput = tr.querySelector('.sheet-name-edit');
+            const editBtn = tr.querySelector('.edit-btn');
+            
+            const newName = nameInput.value.trim();
+            if (newName) {
+                nameSpan.textContent = newName;
+                nameSpan.style.display = 'block';
+                nameInput.style.display = 'none';
+                btn.style.display = 'none';
+                editBtn.style.display = 'inline-block';
+            } else {
+                alert('Sheet名称不能为空');
+            }
+        }
+
+        document.getElementById('files').addEventListener('change', updateFilenamePreview);
+        document.querySelectorAll('input[name="merge_type"]').forEach(radio => {
+            radio.addEventListener('change', updateFilenamePreview);
+        });
+        document.querySelectorAll('input[name="output_format"]').forEach(radio => {
+            radio.addEventListener('change', updateFilenamePreview);
+        });
+
+        function generateDefaultFilename() {
+            const date = new Date();
+            const timestamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+            const format = document.querySelector('input[name="output_format"]:checked').value;
+            const mergeType = document.querySelector('input[name="merge_type"]:checked').value;
+            const mergeTypeText = mergeType === 'sheet' ? '按表名' : '同名合并';
+            return `合并文件_${mergeTypeText}_${timestamp}.${format}`;
+        }
+
+        function updateFilenamePreview() {
+            const filename = generateDefaultFilename();
+            document.getElementById('outputFilename').textContent = filename;
+            document.getElementById('outputFilenameEdit').value = filename;
+        }
+
+        function toggleFilenameEdit() {
+            const nameSpan = document.getElementById('outputFilename');
+            const nameInput = document.getElementById('outputFilenameEdit');
+            const editBtn = document.getElementById('editFilenameBtn');
+            const saveBtn = document.getElementById('saveFilenameBtn');
+            
+            nameSpan.style.display = 'none';
+            nameInput.style.display = 'inline-block';
+            editBtn.style.display = 'none';
+            saveBtn.style.display = 'inline-block';
+            
+            nameInput.focus();
+        }
+
+        function saveFilenameEdit() {
+            const nameSpan = document.getElementById('outputFilename');
+            const nameInput = document.getElementById('outputFilenameEdit');
+            const editBtn = document.getElementById('editFilenameBtn');
+            const saveBtn = document.getElementById('saveFilenameBtn');
+            
+            let newName = nameInput.value.trim();
+            const format = document.querySelector('input[name="output_format"]:checked').value;
+            
+            if (!newName.toLowerCase().endsWith('.' + format)) {
+                newName += '.' + format;
+            }
+            
+            if (newName) {
+                nameSpan.textContent = newName;
+                nameInput.value = newName;
+                nameSpan.style.display = 'inline-block';
+                nameInput.style.display = 'none';
+                saveBtn.style.display = 'none';
+                editBtn.style.display = 'inline-block';
+            } else {
+                alert('文件名不能为空');
+            }
+        }
+
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const selectedFiles = fileListManager.getSelectedFiles();
+            if (selectedFiles.length === 0) {
+                alert('请选择要处理的文件');
+                return;
+            }
+
+            const formData = new FormData();
+            const mergeType = document.querySelector('input[name="merge_type"]:checked').value;
+            const outputFormat = document.querySelector('input[name="output_format"]:checked').value;
+            const customFilename = document.getElementById('outputFilename').textContent;
+            
+            const customSheetNames = {};
+            document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
+                const fileName = tr.cells[0].textContent;
+                const sheetName = tr.querySelector('.sheet-name').textContent;
+                customSheetNames[fileName] = sheetName;
+            });
+            
+            for (let file of selectedFiles) {
+                formData.append('files[]', file);
+            }
+            formData.append('merge_type', mergeType);
+            formData.append('output_format', outputFormat);
+            formData.append('custom_sheet_names', JSON.stringify(customSheetNames));
+            formData.append('custom_filename', customFilename);
+
+            document.getElementById('progress').style.display = 'block';
+            document.getElementById('downloadSection').style.display = 'none';
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    document.getElementById('progress').style.display = 'none';
+                    document.getElementById('downloadSection').style.display = 'block';
+                    
+                    const downloadBtn = document.getElementById('downloadBtn');
+                    downloadBtn.href = `/download/${result.download_path}`;
+                } else {
+                    alert('处理失败：' + result.error);
+                }
+            } catch (error) {
+                alert('发生错误：' + error);
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', updateFilenamePreview);
+    </script>
+</body>
+</html> 
