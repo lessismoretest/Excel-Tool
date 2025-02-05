@@ -22,7 +22,7 @@ def upload_files():
         return jsonify({'error': '没有选择文件'}), 400
     
     files = request.files.getlist('files[]')
-    merge_type = request.form.get('merge_type', 'sheet')
+    merge_type = request.form.get('merge_type', 'sheet')  # 可选值: 'sheet'(分sheet保存), 'same_sheet'(同名sheet合并), 'single_sheet'(合并成一个sheet)
     output_format = request.form.get('output_format', 'xlsx')
     custom_filename = request.form.get('custom_filename', '')
     
@@ -196,7 +196,34 @@ def merge_files(file_paths, merge_type, output_format='xlsx', output_filename=No
     
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
     
-    if merge_type == 'sheet':
+    if merge_type == 'single_sheet':
+        # 合并成单个sheet
+        all_data = []
+        for file_path in file_paths:
+            try:
+                if file_path.endswith('.csv'):
+                    df = pd.read_csv(file_path)
+                    df['来源文件'] = os.path.basename(file_path)
+                    all_data.append(df)
+                else:
+                    xls = pd.ExcelFile(file_path)
+                    for sheet in xls.sheet_names:
+                        df = pd.read_excel(file_path, sheet_name=sheet)
+                        df['来源文件'] = f"{os.path.basename(file_path)} - {sheet}"
+                        all_data.append(df)
+            except Exception as e:
+                raise Exception(f"处理文件 {os.path.basename(file_path)} 时出错: {str(e)}")
+        
+        if all_data:
+            merged_df = pd.concat(all_data, ignore_index=True)
+            if output_format == 'csv':
+                merged_df.to_csv(output_path, index=False, encoding='utf-8-sig')
+            else:
+                merged_df.to_excel(output_path, sheet_name='合并数据', index=False)
+        
+        return output_filename
+    
+    elif merge_type == 'sheet':
         if output_format == 'csv':
             # CSV格式：合并所有数据到一个CSV文件
             all_data = []

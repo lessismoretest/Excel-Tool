@@ -51,8 +51,11 @@
                                 <input type="radio" id="bySheet" name="merge_type" value="sheet" checked>
                                 <label for="bySheet">按原表名分sheet</label>
                                 
-                                <input type="radio" id="combine" name="merge_type" value="combine">
+                                <input type="radio" id="combine" name="merge_type" value="same_sheet">
                                 <label for="combine">相同sheet名合并</label>
+
+                                <input type="radio" id="singleSheet" name="merge_type" value="single_sheet">
+                                <label for="singleSheet">合并成一个sheet</label>
                             </div>
                         </div>
                     </div>
@@ -366,7 +369,20 @@
             const timestamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
             const format = document.querySelector('input[name="output_format"]:checked').value;
             const mergeType = document.querySelector('input[name="merge_type"]:checked').value;
-            const mergeTypeText = mergeType === 'sheet' ? '按表名' : '同名合并';
+            let mergeTypeText;
+            switch(mergeType) {
+                case 'sheet':
+                    mergeTypeText = '按表名';
+                    break;
+                case 'same_sheet':
+                    mergeTypeText = '同名合并';
+                    break;
+                case 'single_sheet':
+                    mergeTypeText = '单表合并';
+                    break;
+                default:
+                    mergeTypeText = '合并';
+            }
             return `合并文件_${mergeTypeText}_${timestamp}.${format}`;
         }
 
