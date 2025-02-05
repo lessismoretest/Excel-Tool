@@ -118,12 +118,14 @@
                         <thead>
                             <tr>
                                 <th>文件名</th>
+                                <th>行数</th>
                                 <th>生成的Sheet名</th>
                                 <th>操作</th>
                             </tr>
                         </thead>
                         <tbody id="sheetPreviewList"></tbody>
                     </table>
+                    <div id="totalRows" class="total-rows" style="margin-top: 10px; font-weight: bold;"></div>
                 </div>
             </div>
 
@@ -132,6 +134,16 @@
             </div>
         </div>
     </div>
+
+    <style>
+        /* 添加样式 */
+        .total-rows {
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+    </style>
 
     <script>
         // 文件列表管理
@@ -292,7 +304,7 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    displaySheetPreview(result.sheet_names);
+                    displaySheetPreview(result.sheet_names, result.total_rows);
                 } else {
                     alert('预览失败：' + result.error);
                 }
@@ -301,14 +313,16 @@
             }
         }
 
-        function displaySheetPreview(sheetNames) {
+        function displaySheetPreview(sheetNames, totalRows) {
             const previewList = document.getElementById('sheetPreviewList');
+            const totalRowsDiv = document.getElementById('totalRows');
             previewList.innerHTML = '';
             
             sheetNames.forEach((sheet, index) => {
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td>${sheet.file}</td>
+                    <td>${sheet.row_count.toLocaleString()}</td>
                     <td>
                         <span class="sheet-name">${sheet.sanitized}</span>
                         <input type="text" class="sheet-name-edit" style="display: none;" value="${sheet.sanitized}">
@@ -321,6 +335,7 @@
                 previewList.appendChild(tr);
             });
             
+            totalRowsDiv.innerHTML = `总行数：${totalRows.toLocaleString()}`;
             document.getElementById('sheetPreview').style.display = 'block';
         }
 
@@ -448,8 +463,10 @@
             const customSheetNames = {};
             document.querySelectorAll('#sheetPreviewList tr').forEach(tr => {
                 const fileName = tr.cells[0].textContent;
+                // 去掉文件扩展名
+                const fileNameWithoutExt = fileName.replace(/\.[^/.]+$/, "");
                 const sheetName = tr.querySelector('.sheet-name').textContent;
-                customSheetNames[fileName] = sheetName;
+                customSheetNames[fileNameWithoutExt] = sheetName;
             });
             
             for (let file of selectedFiles) {
@@ -457,7 +474,7 @@
             }
             formData.append('merge_type', mergeType);
             formData.append('output_format', outputFormat);
-            formData.append('custom_sheet_names', JSON.stringify(customSheetNames));
+            formData.append('sheet_names', JSON.stringify(customSheetNames));
             formData.append('custom_filename', customFilename);
 
             document.getElementById('progress').style.display = 'block';

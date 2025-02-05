@@ -3,6 +3,7 @@ import pandas as pd
 import os
 from werkzeug.utils import secure_filename
 import uuid
+import json
 
 app = Flask(__name__)
 # 使用绝对路径
@@ -22,9 +23,19 @@ def upload_files():
         return jsonify({'error': '没有选择文件'}), 400
     
     files = request.files.getlist('files[]')
-    merge_type = request.form.get('merge_type', 'sheet')  # 可选值: 'sheet'(分sheet保存), 'same_sheet'(同名sheet合并), 'single_sheet'(合并成一个sheet)
+    merge_type = request.form.get('merge_type', 'sheet')
     output_format = request.form.get('output_format', 'xlsx')
     custom_filename = request.form.get('custom_filename', '')
+    custom_sheet_names = request.form.get('sheet_names', '{}')
+    
+    print(f"收到的自定义文件名: {custom_filename}")  # 添加日志
+    print(f"收到的自定义sheet名: {custom_sheet_names}")  # 添加日志
+    
+    try:
+        custom_sheet_names = json.loads(custom_sheet_names)
+        print(f"解析后的sheet名字典: {custom_sheet_names}")  # 添加日志
+    except:
+        custom_sheet_names = {}
     
     if not files or files[0].filename == '':
         return jsonify({'error': '没有选择文件'}), 400
@@ -41,11 +52,15 @@ def upload_files():
 
         # 使用自定义文件名或生成默认文件名
         if custom_filename:
-            output_filename = secure_filename(custom_filename)
+            # 保留原始文件名，不使用secure_filename
+            output_filename = custom_filename
+            if not output_filename.endswith(output_format):
+                output_filename = f"{output_filename}.{output_format}"
+            print(f"最终使用的文件名: {output_filename}")  # 添加日志
         else:
             output_filename = f"merged_{uuid.uuid4().hex[:8]}.{output_format}"
         
-        output_path = merge_files(saved_files, merge_type, output_format, output_filename)
+        output_path = merge_files(saved_files, merge_type, output_format, output_filename, custom_sheet_names)
         
         # 清理临时文件
         for file_path in saved_files:
@@ -57,7 +72,7 @@ def upload_files():
             
         return jsonify({
             'success': True,
-            'download_path': output_path
+            'download_path': output_filename  # 只返回文件名，不返回完整路径
         })
     except Exception as e:
         # 发生错误时也要清理临时文件
@@ -75,7 +90,8 @@ def download_file(filename):
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         if not os.path.exists(file_path):
             return jsonify({'error': '文件不存在'}), 404
-        return send_file(file_path, as_attachment=True)
+        # 使用原始文件名作为下载文件名
+        return send_file(file_path, as_attachment=True, download_name=filename)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -94,6 +110,7 @@ def preview_sheets():
     saved_files = []
     try:
         sheet_names = []
+        total_rows = 0
         for file in files:
             if file and allowed_file(file.filename):
                 filename = secure_filename(file.filename)
@@ -101,23 +118,30 @@ def preview_sheets():
                 file.save(temp_path)
                 saved_files.append(temp_path)
                 
-                # 获取预览的sheet名
-                if merge_type == 'sheet':
-                    if file.filename.endswith('.csv'):
-                        base_name = os.path.splitext(filename)[0]
-                        sheet_names.append({
-                            'original': base_name,
-                            'sanitized': sanitize_sheet_name(base_name),
-                            'file': filename
-                        })
-                    else:
-                        file_base_name = os.path.splitext(filename)[0]
-                        sheet_name = sanitize_sheet_name(file_base_name)
-                        sheet_names.append({
-                            'original': file_base_name,
-                            'sanitized': sheet_name,
-                            'file': filename
-                        })
+                # 获取预览的sheet名和行数
+                if file.filename.endswith('.csv'):
+                    df = pd.read_csv(temp_path)
+                    row_count = len(df)
+                    total_rows += row_count
+                    base_name = os.path.splitext(filename)[0]
+                    sheet_names.append({
+                        'original': base_name,
+                        'sanitized': sanitize_sheet_name(base_name),
+                        'file': filename,
+                        'row_count': row_count
+                    })
+                else:
+                    df = pd.read_excel(temp_path)
+                    row_count = len(df)
+                    total_rows += row_count
+                    file_base_name = os.path.splitext(filename)[0]
+                    sheet_name = sanitize_sheet_name(file_base_name)
+                    sheet_names.append({
+                        'original': file_base_name,
+                        'sanitized': sheet_name,
+                        'file': filename,
+                        'row_count': row_count
+                    })
 
         # 清理临时文件
         for file_path in saved_files:
@@ -129,7 +153,8 @@ def preview_sheets():
 
         return jsonify({
             'success': True,
-            'sheet_names': sheet_names
+            'sheet_names': sheet_names,
+            'total_rows': total_rows
         })
     except Exception as e:
         # 清理临时文件
@@ -190,10 +215,13 @@ def get_unique_sheet_name(sheet_name, existing_names):
     
     return final_name
 
-def merge_files(file_paths, merge_type, output_format='xlsx', output_filename=None):
+def merge_files(file_paths, merge_type, output_format='xlsx', output_filename=None, custom_sheet_names=None):
     if not output_filename:
         output_filename = f"merged_{uuid.uuid4().hex[:8]}.{output_format}"
     
+    if custom_sheet_names is None:
+        custom_sheet_names = {}
+        
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], output_filename)
     
     if merge_type == 'single_sheet':
@@ -243,27 +271,39 @@ def merge_files(file_paths, merge_type, output_format='xlsx', output_filename=No
                 merged_df = pd.concat(all_data, ignore_index=True)
                 merged_df.to_csv(output_path, index=False, encoding='utf-8-sig')
         else:
-            # Excel格式：按原来的处理方式
             with pd.ExcelWriter(output_path) as writer:
                 existing_names = set()
+                total_rows = 0
                 for file_path in file_paths:
                     try:
                         if file_path.endswith('.csv'):
                             df = pd.read_csv(file_path)
+                            print(f"读取文件 {os.path.basename(file_path)}, 行数: {len(df)}")  # 添加日志
                             base_name = os.path.splitext(os.path.basename(file_path))[0]
-                            sheet_name = get_unique_sheet_name(base_name, existing_names)
+                            if base_name in custom_sheet_names:
+                                sheet_name = get_unique_sheet_name(custom_sheet_names[base_name], existing_names)
+                            else:
+                                sheet_name = get_unique_sheet_name(base_name, existing_names)
                             existing_names.add(sheet_name)
                             df.to_excel(writer, sheet_name=sheet_name, index=False)
+                            total_rows += len(df)
                         else:
                             xls = pd.ExcelFile(file_path)
                             file_base_name = os.path.splitext(os.path.basename(file_path))[0]
-                            sheet_name = sanitize_sheet_name(file_base_name)
+                            if file_base_name in custom_sheet_names:
+                                sheet_name = get_unique_sheet_name(custom_sheet_names[file_base_name], existing_names)
+                            else:
+                                sheet_name = get_unique_sheet_name(file_base_name, existing_names)
                             if sheet_name not in existing_names:
                                 df = pd.read_excel(file_path)
+                                print(f"读取文件 {os.path.basename(file_path)}, 行数: {len(df)}")  # 添加日志
                                 existing_names.add(sheet_name)
                                 df.to_excel(writer, sheet_name=sheet_name, index=False)
+                                total_rows += len(df)
                     except Exception as e:
+                        print(f"处理文件出错: {str(e)}")  # 添加错误日志
                         raise Exception(f"处理文件 {os.path.basename(file_path)} 时出错: {str(e)}")
+                print(f"总行数: {total_rows}")  # 添加总行数日志
     else:
         # 相同sheet名合并
         if output_format == 'csv':
